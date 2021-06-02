@@ -1,14 +1,30 @@
 extern crate serde;
 
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 extern crate chrono;
 extern crate jsonwebtoken;
+#[macro_use] extern crate lazy_static;
 
-#[derive(Deserialize)]
-pub struct LoginData {
-    pub login: String,
-    pub pwd: String
+pub trait LoginData {
+    type Claim: Serialize + Clone;
+    fn to_claim(&self) -> Self::Claim;
+}
+
+#[derive(Serialize, Clone, Deserialize)]
+pub struct Payload<T: Clone> {
+    claim: T,
+    exp: usize
+}
+
+impl<T: Serialize + Clone + DeserializeOwned> Payload<T> {
+    pub fn get_claim(&self) -> T {
+        self.claim.clone()
+    }
+
+    pub fn into_claim(self) -> T {
+        self.claim
+    }
 }
 
 #[derive(Serialize)]
@@ -16,29 +32,29 @@ pub struct AuthenticationToken {
     pub token: String
 }
 
-#[derive(Debug, Serialize, Deserialize)] 
-pub struct Claims {
-    sub: String,
-    exp: usize,
-}
-
 pub trait Authenticator {
+    type Data: LoginData;
+    type Output;
     type Err;
 
-    fn check(data: LoginData) -> Result<AuthenticationToken, Self::Err>;
+    fn check(data: Self::Data) -> Result<Self::Output, Self::Err>;
 }
 
 use chrono::{Duration};
+use std::marker::PhantomData;
 
 #[derive(Clone)]
-pub struct TokenSource {
+pub struct TokenSource<TClaim: Clone + Serialize + DeserializeOwned> {
     secret: Box<[u8]>,
-    expiration_period: chrono::Duration
+    expiration_period: Duration,
+    _claim_type: PhantomData<TClaim>
 }
 
-const DEFAULT_EXPIRATION_PERIOD: Duration = Duration::minutes(30);
+lazy_static! {
+    pub static ref DEFAULT_EXPIRATION_PERIOD: Duration = Duration::minutes(30);
+}
 
-impl TokenSource {
+impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
     pub fn deafult() -> Self {
         let default = b"Some very cool secret";
 
@@ -55,25 +71,38 @@ impl TokenSource {
 
         Self {
             secret: secret.into_boxed_slice(),
-            expiration_period: DEFAULT_EXPIRATION_PERIOD
+            expiration_period: *DEFAULT_EXPIRATION_PERIOD,
+            _claim_type: PhantomData
         }
     }
 
-    pub fn create_token(&self, data: LoginData) -> Result<AuthenticationToken, Error> {
+    pub fn create_token<T: LoginData<Claim = TClaim>>(&self, data: T) -> Result<AuthenticationToken, Error> {
         use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
 
         let exp = calc_expiration_timestamp(self.expiration_period);
-        let claims = Claims {
-            sub: data.login,
+        let payload = Payload::<T::Claim> {
+            claim: data.to_claim(),
             exp: exp as usize
         };
 
         let header = Header::new(Algorithm::HS256);
 
-        let token = encode(&header, &claims, &EncodingKey::from_secret(&self.secret))
+        let token = encode(&header, &payload, &EncodingKey::from_secret(&self.secret))
             .map_err(|_| Error::JWTCreationError)?;
 
         Ok(AuthenticationToken { token })
+    }
+
+    pub fn verify_token(&self, token: String) -> Result<TClaim, Error> {
+        use jsonwebtoken::{decode, DecodingKey, Algorithm, Validation};
+
+        let decoded = decode::<Payload<TClaim>>(
+            &token, 
+            &DecodingKey::from_secret(&self.secret), 
+            &Validation::new(Algorithm::HS256))
+            .map_err(|_| Error::JWTDecodingError)?;
+
+        Ok(decoded.claims.claim)
     }
 }
 
@@ -84,10 +113,11 @@ fn calc_expiration_timestamp(expiration_period: Duration) -> i64 {
         .timestamp()
 }
 
-unsafe impl Send for TokenSource { }
+unsafe impl<TClaim: Clone + Serialize + DeserializeOwned> Send for TokenSource<TClaim> { }
 
-enum Error {
-    JWTCreationError
+pub enum Error {
+    JWTCreationError,
+    JWTDecodingError
 }
 
 #[cfg(test)]
