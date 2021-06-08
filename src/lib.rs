@@ -104,6 +104,18 @@ impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
 
         Ok(decoded.claims.claim)
     }
+
+    pub fn verify_token_str(&self, token: &str) -> Result<TClaim, Error> {
+        use jsonwebtoken::{decode, DecodingKey, Algorithm, Validation};
+
+        let decoded = decode::<Payload<TClaim>>(
+            token, 
+            &DecodingKey::from_secret(&self.secret), 
+            &Validation::new(Algorithm::HS256))
+            .map_err(|_| Error::JWTDecodingError)?;
+
+        Ok(decoded.claims.claim)
+    }
 }
 
 fn calc_expiration_timestamp(expiration_period: Duration) -> i64 {
