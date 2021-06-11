@@ -1,9 +1,5 @@
-extern crate serde;
-
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
-
-extern crate chrono;
-extern crate jsonwebtoken;
+use async_trait::*;
 #[macro_use] extern crate lazy_static;
 
 pub trait LoginData {
@@ -11,7 +7,18 @@ pub trait LoginData {
     type Context;
     type Err;
 
-    fn to_claim(&self, context: &Self::Context) -> Result<Self::Claim, Self::Err>;
+    fn to_claim(self, context: &Self::Context) 
+        -> Result<Self::Claim, Self::Err>;
+}
+
+#[async_trait]
+pub trait LoginDataAsync {
+    type Claim: Serialize + Clone;
+    type Context;
+    type Err;
+
+    async fn to_claim(self, context: &Self::Context) 
+        -> Result<Self::Claim, Self::Err>;
 }
 
 #[derive(Serialize, Clone, Deserialize)]
@@ -80,6 +87,23 @@ impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
         let exp = calc_expiration_timestamp(self.expiration_period);
         let payload = Payload::<T::Claim> {
             claim: data.to_claim(context).map_err(|_| Error::JWTCreationError)?,
+            exp: exp as usize
+        };
+
+        let header = Header::new(Algorithm::HS256);
+
+        let token = encode(&header, &payload, &EncodingKey::from_secret(&self.secret))
+            .map_err(|_| Error::JWTCreationError)?;
+
+        Ok(token)
+    }
+
+    pub async fn create_token_async<T: LoginDataAsync<Claim = TClaim>>(&self, data: T, context: &T::Context) -> Result<String, Error> {
+        use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
+
+        let exp = calc_expiration_timestamp(self.expiration_period);
+        let payload = Payload::<T::Claim> {
+            claim: data.to_claim(context).await.map_err(|_| Error::JWTCreationError)?,
             exp: exp as usize
         };
 
