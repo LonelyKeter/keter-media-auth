@@ -8,7 +8,10 @@ extern crate jsonwebtoken;
 
 pub trait LoginData {
     type Claim: Serialize + Clone;
-    fn to_claim(&self) -> Self::Claim;
+    type Context;
+    type Err;
+
+    fn to_claim(&self, context: &Self::Context) -> Result<Self::Claim, Self::Err>;
 }
 
 #[derive(Serialize, Clone, Deserialize)]
@@ -25,11 +28,6 @@ impl<T: Serialize + Clone + DeserializeOwned> Payload<T> {
     pub fn into_claim(self) -> T {
         self.claim
     }
-}
-
-#[derive(Serialize)]
-pub struct AuthenticationToken {
-    pub token: String
 }
 
 pub trait Authenticator {
@@ -76,12 +74,12 @@ impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
         }
     }
 
-    pub fn create_token<T: LoginData<Claim = TClaim>>(&self, data: T) -> Result<AuthenticationToken, Error> {
+    pub fn create_token<T: LoginData<Claim = TClaim>>(&self, data: T, context: &T::Context) -> Result<String, Error> {
         use jsonwebtoken::{encode, Algorithm, Header, EncodingKey};
 
         let exp = calc_expiration_timestamp(self.expiration_period);
         let payload = Payload::<T::Claim> {
-            claim: data.to_claim(),
+            claim: data.to_claim(context).map_err(|_| Error::JWTCreationError)?,
             exp: exp as usize
         };
 
@@ -90,7 +88,7 @@ impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
         let token = encode(&header, &payload, &EncodingKey::from_secret(&self.secret))
             .map_err(|_| Error::JWTCreationError)?;
 
-        Ok(AuthenticationToken { token })
+        Ok(token)
     }
 
     pub fn verify_token(&self, token: String) -> Result<TClaim, Error> {
