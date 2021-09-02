@@ -86,14 +86,13 @@ impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
 
         let exp = calc_expiration_timestamp(self.expiration_period);
         let payload = Payload::<T::Claim> {
-            claim: data.to_claim(context).map_err(|_| Error::JWTCreationError)?,
+            claim: data.to_claim(context).map_err(|_| Error::ClaimCreationError)?,
             exp: exp as usize
         };
 
         let header = Header::new(Algorithm::HS256);
 
-        let token = encode(&header, &payload, &EncodingKey::from_secret(&self.secret))
-            .map_err(|_| Error::JWTCreationError)?;
+        let token = encode(&header, &payload, &EncodingKey::from_secret(&self.secret))?;
 
         Ok(token)
     }
@@ -103,14 +102,13 @@ impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
 
         let exp = calc_expiration_timestamp(self.expiration_period);
         let payload = Payload::<T::Claim> {
-            claim: data.to_claim(context).await.map_err(|_| Error::JWTCreationError)?,
+            claim: data.to_claim(context).await.map_err(|_| Error::ClaimCreationError)?,
             exp: exp as usize
         };
 
         let header = Header::new(Algorithm::HS256);
 
-        let token = encode(&header, &payload, &EncodingKey::from_secret(&self.secret))
-            .map_err(|_| Error::JWTCreationError)?;
+        let token = encode(&header, &payload, &EncodingKey::from_secret(&self.secret))?;
 
         Ok(token)
     }
@@ -149,9 +147,19 @@ fn calc_expiration_timestamp(expiration_period: Duration) -> i64 {
 
 unsafe impl<TClaim: Clone + Serialize + DeserializeOwned> Send for TokenSource<TClaim> { }
 
+#[derive(Debug)]
 pub enum Error {
-    JWTCreationError,
+    ClaimCreationError,
+    JWTCreationError { inner: jsonwebtoken::errors::Error },
     JWTDecodingError
+}
+
+impl From<jsonwebtoken::errors::Error> for Error {
+    fn from(inner: jsonwebtoken::errors::Error) -> Self {
+        Self::JWTCreationError {
+            inner
+        }
+    }
 }
 
 #[cfg(test)]
