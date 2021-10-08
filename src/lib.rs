@@ -56,7 +56,7 @@ pub struct TokenSource<TClaim: Clone + Serialize + DeserializeOwned> {
 }
 
 lazy_static! {
-    pub static ref DEFAULT_EXPIRATION_PERIOD: Duration = Duration::minutes(30);
+    pub static ref DEFAULT_EXPIRATION_PERIOD: Duration = Duration::days(1);
 }
 
 impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
