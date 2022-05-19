@@ -113,7 +113,7 @@ impl<TClaim: Clone + Serialize + DeserializeOwned> TokenSource<TClaim> {
         Ok(token)
     }
 
-    //TODO: Change error kind to <T as LoginDataAsync>::Error
+    
     pub async fn create_token_async<T: LoginDataAsync<Claim = TClaim>>(
         &self,
         data: T,
